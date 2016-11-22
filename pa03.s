@@ -3,14 +3,13 @@
 @ error code values
 @ you can easily load these like: mov r0,#ERR_OP_UNDEFINED
 .equ ERR_NONE, 0x00000000
-.equ ERR_OP_UNDEFINED, 0x00000001
 .equ ERR_OP_OVERFLOW, 0x00000002
 .equ ERR_OP_DIV_BY_ZERO, 0x00000003
 
 @ constants for keeping track of calculator state
 .equ STATE_INPUT_1, 0x0
-.equ STATE_INPUT_2_OPERATION, 0x1	@ input 1 must have been a number
-.equ STATE_INPUT_2_OPERAND, 0x2		@ input 1 must have been an  operation
+.equ STATE_INPUT_2_OPERATION, 0x1	@ input 1 must have been a 								   number
+.equ STATE_INPUT_2_OPERAND, 0x2		@ input 1 must have been an 							  operation
 .equ STATE_INPUT_3, 0x3
 
 @ uart constants
@@ -42,7 +41,7 @@ main_loop:				@ determines state, loads string for input type
 	cmp	r6, #STATE_INPUT_3
 	ldreq	r1, =string_input_operand
 
-go:	bl	print_string		@ print what type of input we're looking for
+go:	bl	print_string		@ print what type of input we're 						  looking for
 	ldr	r4, =buf		@ needed for input
 	ldr	r5, =buf_end	@ needed for checking bounds of input
 @ read, wait, 
@@ -94,7 +93,7 @@ line_done:
 	beq	main_loop		@ get next input
 	cmp	r6, #STATE_INPUT_2_OPERATION 	@ check our state
 	bne	next				@ if ne check next state
-	bl	handleUndefined		@ if this happens then operation 						  is undefined
+	bl	handleUndefined		@ if this happens then operation 						  @is undefined
 	mov	r6, #STATE_INPUT_1	@ start again
 	b	main_loop			@ start again
 
@@ -237,53 +236,86 @@ ei_end:	pop	{ r0-r8, lr }		@ restore r0-r8, lr
 @ assumes r0 the address of the first byte of string
 @ returns with r0 == 1 if it was the negate operation ('-'), else 0
 isNegate:
-	cmp	r0, #'-'
-	beq	isNegateYes
-	mov	r0, #0
+	push	{r1-r2, lr}
+	mov	r1, r0
+	ldrb 	r2, [r1]
+
+	cmp 	r2, #0x2D
+	beq	endIsNegate
+
+	mov 	r0, #0
+	pop	{r1-r2, lr}
 	bx lr
-isNegateYes:
-	mov	r0, #1
+endIsNegate:
+	mov 	r0, #1
+	pop	{r1-r2, lr}
 	bx lr
 
 @ assumes r0 the address of the first byte of string
 @ returns with r0 == 1 if it was a valid operation ('+', '-', '*', '/'), else 0
 isOperation:
-	cmp	r0, #'+'
-	beq	isOperationYes
-	cmp	r0, #'-'
-	beq	isOperationYes
-	cmp	r0, #'*'
-	beq	isOperationYes
-	cmp	r0, #'/'
-	beq	isOperationYes
-	mov	r0, #0
+	push	{r1-r3, lr}
+	mov	r1, r0
+	ldrb 	r2, [r1]
+
+	cmp	r2, #0x2B
+	ldreqb 	r2, [r1, #1]
+	cmpeq 	r2, #0x00
+	beq 	endIsOperation
+
+	cmp 	r2, #0x2D
+	ldreqb 	r2, [r1, #1]
+	cmpeq	r2, #0x00
+	beq	endIsOperation
+
+	cmp	r2, #0x2A
+	ldreqb 	r2, [r1, #1]
+	cmpeq	r2, #0x00
+	beq	endIsOperation
+
+	cmp 	r2, #0x2F
+	ldreqb 	r2, [r1, #1]
+	cmpeq	r2, #0x00
+	beq	endIsOperation
+
+	mov 	r0, #0
+	pop	{r1-r3, lr}
 	bx lr
-isOperationYes:
-	mov	r0, #1
+endIsOperation:
+	mov 	r0, #1
+	pop	{r1-r3, lr}
 	bx lr
 
 @ assumes r0 the address of first byte of string
 @ returns with r0 == 1 if it was a number (e.g., in ascii), else 0
 isNumber:
-	cmp	r0, #'0'
-	blt	isNumberNo2
-	bge	isNumberNo1
-	bx lr
-isNumberNo1:
-	cmp	r0, #'9'
-	bgt	isNumberNo2
+	push	{r1-r8, lr}
+	mov	r1, r0
+	ldrb	r2, [r1]
+	cmp	r2, #0x30
+	blt	endIsNumber
+	cmp	r2, #0x39
+	bgt	endIsNumber
 	mov	r0, #1
+	pop	{r1-r8, lr}
 	bx lr
-isNumberNo2:
+endIsNumber:
 	mov	r0, #0
-	bx lr
-	
+	pop	{r1-r8, lr}
+	bx lr	
 
 @ write execution procedures next
 @ each of these get executed respectively on different input operations
 @ executed on binary '+' operation
 executeAdd:
+	push	{r2, lr}
+	add 	r2, r0, r1
+	bvs	handleOverflow
+	mov	r0, r2
+	pop	{r2, lr}
 	bx lr
+
+
 	
 @ executed on binary '-' operation
 executeSubtract:
@@ -308,6 +340,12 @@ executeNegate:
 @ called on undefined input
 @ should print appropriate error message
 handleUndefined:
+	push	{r0, r1, lr}
+	ldr	r0, =ADDR_UART0
+	ldr	r1, =string_undefined
+	bl 	print_string
+	mov	r8, #1
+	pop	{r0, r1, lr}
 	bx lr
 	
 @ called on overflow
@@ -315,10 +353,12 @@ handleUndefined:
 @ for example, you might use: bvc (branch if overflow clear) and bvs (branch if overflow set) or the corresponding branch with link (blvc or blvs)
 @ should print appropriate error message
 handleOverflow:
-	ldr	r0, =ADDR_UART0		@ r0 = UART address
-	bl	newline			@ print newline
-	ldr	r1, =string_overflow	@ r1 = address of string_overflow
-	bl	print_string		@ print quit string
+	push	{r0, r1, lr}
+	ldr	r0, =ADDR_UART0
+	ldr	r1, =string_overflow
+	bl 	print_string
+	mov	r8, #1
+	pop	{r0, r1, lr}
 	bx lr
 	
 @ called on division by zero
@@ -441,4 +481,3 @@ _operandB:
 @ NOTE: has enough space for -MAX_INT
 buf:		.byte 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 buf_end:	.byte 0
-
